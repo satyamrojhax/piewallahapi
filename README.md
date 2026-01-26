@@ -1,11 +1,11 @@
 # Piewallah Video API
 
-A FastAPI-based service to fetch video content and DRM keys from studyweb.live for the Piewallah video application.
+A FastAPI-based service for video content management and DRM key handling.
 
 ## Features
 
-- Fetch video URLs with authentication
-- Extract DRM keys from video manifests
+- Secure video URL fetching with authentication
+- DRM key extraction and management
 - Combined response with stream URL and DRM information
 - Ready for Vercel deployment
 - CORS enabled for web applications
@@ -22,7 +22,7 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-3. Update `.env` with your actual authentication tokens from studyweb.live
+3. Update `.env` with your authentication tokens
 
 ## Local Development
 
@@ -46,7 +46,7 @@ Fetch video content with DRM keys
 
 **Example:**
 ```
-GET /api/video?batchId=67be1ea9e92878bc16923fe8&subjectId=5f709c351b999704b83cca8a&childId=695fcb95dff25a9c77c7dc15
+GET /api/video?batchId=BATCH_ID&subjectId=SUBJECT_ID&childId=CHILD_ID
 ```
 
 **Response:**
@@ -54,17 +54,17 @@ GET /api/video?batchId=67be1ea9e92878bc16923fe8&subjectId=5f709c351b999704b83cca
 {
   "success": true,
   "data": {
-    "url": "https://sec-prod-mediacdn.pw.live/...",
+    "url": "https://example-cdn.com/...",
     "signedUrl": "?URLPrefix=...",
-    "urlType": "penpencilvdo",
+    "urlType": "video",
     "scheduleInfo": {...},
     "videoContainer": "DASH",
     "isCmaf": false,
     "serverTime": 1234567890,
-    "cdnType": "Gcp"
+    "cdnType": "CDN"
   },
-  "stream_url": "https://sec-prod-mediacdn.pw.live/...?URLPrefix=...",
-  "url_type": "penpencilvdo",
+  "stream_url": "https://example-cdn.com/...?URLPrefix=...",
+  "url_type": "video",
   "drm": {
     "kid": "",
     "key": ""
@@ -97,10 +97,11 @@ Make sure to set your environment variables in the Vercel dashboard.
 
 ## Environment Variables
 
-- `ACCESS_TOKEN`: JWT access token from studyweb.live
-- `REFRESH_TOKEN`: Refresh token from studyweb.live  
-- `ANON_ID`: Anonymous ID from studyweb.live
-- `API_BASE_URL`: Base URL (default: https://studyweb.live)
+- `ACCESS_TOKEN`: JWT access token for authentication
+- `REFRESH_TOKEN`: Refresh token for session management  
+- `ANON_ID`: Anonymous identifier
+- `API_BASE_URL`: Base URL for API endpoints
+- `PERF_COOKIE`: Performance cookie (optional)
 
 ## Powered By
 
