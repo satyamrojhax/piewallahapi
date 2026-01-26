@@ -1,0 +1,1126 @@
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
+import httpx
+import os
+import base64
+import re
+import json
+import jwt
+from dotenv import load_dotenv
+from pydantic import BaseModel
+from typing import Optional, Dict, Any
+
+load_dotenv()
+
+app = FastAPI(title="Piewallah Video API", version="1.0.0")
+
+# Configure CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+class BatchResponse(BaseModel):
+    success: bool
+    data: Dict[str, Any]
+    pagination: Optional[Dict[str, Any]] = None
+    errors: Optional[str] = None
+
+class VideoResponse(BaseModel):
+    success: bool
+    data: Dict[str, Any]
+    stream_url: Optional[str] = None
+    url_type: Optional[str] = None
+    drm: Optional[Dict[str, str]] = None
+
+class JWTResponse(BaseModel):
+    success: bool
+    header: Dict[str, Any]
+    payload: Dict[str, Any]
+    signature: str
+    token_info: Dict[str, Any]
+    errors: Optional[str] = None
+
+class PiewallahAPI:
+    def __init__(self):
+        # Multiple base URLs with fallback logic
+        self.base_urls = [
+            os.getenv("API_BASE_URL", "https://studyweb.live"),  # Primary
+            "https://studymeta.in",  # Fallback 1
+            "https://pwthor.site"    # Fallback 2
+        ]
+        self.access_token = os.getenv("ACCESS_TOKEN")
+        self.refresh_token = os.getenv("REFRESH_TOKEN")
+        self.anon_id = os.getenv("ANON_ID")
+        self.perf_cookie = os.getenv("PERF_COOKIE")
+        
+        if not all([self.access_token, self.refresh_token, self.anon_id]):
+            raise ValueError("Missing required authentication tokens in environment variables")
+    
+    def get_headers(self) -> Dict[str, str]:
+        return {
+            "accept": "*/*",
+            "accept-language": "en-US,en;q=0.9",
+            "dnt": "1",
+            "priority": "u=1, i",
+            "sec-ch-ua": '"Chromium";v="143", "Not A(Brand";v="24"',
+            "sec-ch-ua-mobile": "?0",
+            "sec-ch-ua-platform": '"Windows"',
+            "sec-fetch-dest": "empty",
+            "sec-fetch-mode": "cors",
+            "sec-fetch-site": "same-origin",
+            "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36",
+            "cookie": f"anon_id={self.anon_id}; accessToken={self.access_token}; refreshToken={self.refresh_token}; {self.perf_cookie}" if self.perf_cookie else f"anon_id={self.anon_id}; accessToken={self.access_token}; refreshToken={self.refresh_token}"
+        }
+    
+    async def fetch_batches(self, page: int = 1, limit: int = 100) -> Dict[str, Any]:
+        """Fetch batches from Heroku API"""
+        url = "https://pw-api-0585c7015531.herokuapp.com/api/batches"
+        params = {"page": page, "limit": limit}
+        
+        headers = {
+            "accept": "*/*",
+            "accept-language": "en-US,en;q=0.9",
+            "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36"
+        }
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, params=params, headers=headers)
+            response.raise_for_status()
+            
+            try:
+                return response.json()
+            except Exception as e:
+                print(f"Failed to parse batches JSON response: {e}")
+                content = response.content
+                if content:
+                    try:
+                        text_content = content.decode('utf-8')
+                        return json.loads(text_content)
+                    except (UnicodeDecodeError, json.JSONDecodeError):
+                        try:
+                            text_content = content.decode('latin-1')
+                            return json.loads(text_content)
+                        except Exception as e2:
+                            print(f"All decoding attempts failed for batches: {e2}")
+                            raise HTTPException(status_code=500, detail="Failed to decode batches API response")
+                else:
+                    raise HTTPException(status_code=500, detail="Empty response from batches API")
+    
+    async def fetch_all_batches(self) -> Dict[str, Any]:
+        """Fetch all batches by paginating through all pages"""
+        all_batches = []
+        current_page = 1
+        page_size = 692  # As per your URL
+        total_batches = 0
+        
+        while True:
+            try:
+                print(f"Fetching page {current_page}...")
+                batches_data = await self.fetch_batches(page=current_page, limit=page_size)
+                
+                if not batches_data.get('success', True):
+                    print(f"API returned failure on page {current_page}")
+                    break
+                
+                # Extract batches from response
+                if 'data' in batches_data:
+                    if isinstance(batches_data['data'], list):
+                        page_batches = batches_data['data']
+                    elif isinstance(batches_data['data'], dict) and 'batches' in batches_data['data']:
+                        page_batches = batches_data['data']['batches']
+                    else:
+                        page_batches = []
+                    
+                    if not page_batches:
+                        print(f"No more batches found on page {current_page}")
+                        break
+                    
+                    all_batches.extend(page_batches)
+                    print(f"Found {len(page_batches)} batches on page {current_page}, total: {len(all_batches)}")
+                    
+                    # Check if we have all batches
+                    if len(page_batches) < page_size:
+                        print(f"Reached end of batches (got {len(page_batches)} < {page_size})")
+                        break
+                    
+                    current_page += 1
+                else:
+                    print(f"No data field in response on page {current_page}")
+                    break
+                    
+            except Exception as e:
+                print(f"Error fetching page {current_page}: {e}")
+                if current_page == 1:  # If first page fails, raise error
+                    raise HTTPException(status_code=500, detail=f"Failed to fetch batches: {str(e)}")
+                break  # Otherwise stop pagination
+        
+        return {
+            "success": True,
+            "data": {
+                "batches": all_batches,
+                "total_count": len(all_batches),
+                "pages_fetched": current_page - 1
+            },
+            "pagination": {
+                "total_batches": len(all_batches),
+                "pages_fetched": current_page - 1,
+                "last_page_size": len(all_batches) % page_size if len(all_batches) >= page_size else len(all_batches)
+            }
+        }
+    
+    async def fetch_batch_details(self, batch_id: str) -> Dict[str, Any]:
+        """Fetch batch details from Heroku API"""
+        url = f"https://pw-api-0585c7015531.herokuapp.com/api/batch/{batch_id}"
+        
+        headers = {
+            "accept": "*/*",
+            "accept-language": "en-US,en;q=0.9",
+            "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36"
+        }
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, headers=headers)
+            response.raise_for_status()
+            
+            try:
+                return response.json()
+            except Exception as e:
+                print(f"Failed to parse batch details JSON response: {e}")
+                content = response.content
+                if content:
+                    try:
+                        text_content = content.decode('utf-8')
+                        return json.loads(text_content)
+                    except (UnicodeDecodeError, json.JSONDecodeError):
+                        try:
+                            text_content = content.decode('latin-1')
+                            return json.loads(text_content)
+                        except Exception as e2:
+                            print(f"All decoding attempts failed for batch details: {e2}")
+                            raise HTTPException(status_code=500, detail="Failed to decode batch details API response")
+                else:
+                    raise HTTPException(status_code=500, detail="Empty response from batch details API")
+    
+    async def fetch_video_url(self, batch_id: str, subject_id: str, child_id: str) -> Dict[str, Any]:
+        """Fetch video URL from studyweb.live API with fallback logic"""
+        params = {
+            "batchId": batch_id,
+            "subjectId": subject_id,
+            "childId": child_id
+        }
+        
+        # Try each base URL in order
+        for i, base_url in enumerate(self.base_urls):
+            try:
+                url = f"{base_url}/api/get-video-url"
+                print(f"Trying base URL {i+1}/{len(self.base_urls)}: {base_url}")
+                
+                async with httpx.AsyncClient() as client:
+                    response = await client.get(url, params=params, headers=self.get_headers())
+                    response.raise_for_status()
+                    
+                    # Handle compressed response
+                    try:
+                        data = response.json()
+                        print(f"✅ Success with {base_url}")
+                        return data
+                    except Exception as e:
+                        print(f"Failed to parse JSON response from {base_url}: {e}")
+                        # If JSON parsing fails, try to get raw content and decode
+                        content = response.content
+                        if content:
+                            # Try to decode as UTF-8 with error handling
+                            try:
+                                text_content = content.decode('utf-8')
+                                return json.loads(text_content)
+                            except (UnicodeDecodeError, json.JSONDecodeError):
+                                # If that fails, try latin-1
+                                try:
+                                    text_content = content.decode('latin-1')
+                                    return json.loads(text_content)
+                                except Exception as e2:
+                                    print(f"All decoding attempts failed for {base_url}: {e2}")
+                                    continue  # Try next URL
+                        else:
+                            continue  # Try next URL
+                            
+            except httpx.HTTPStatusError as e:
+                print(f"❌ HTTP error from {base_url}: {e.response.status_code}")
+                if i == len(self.base_urls) - 1:  # Last URL
+                    raise HTTPException(status_code=e.response.status_code, detail=f"All base URLs failed. Last error: {e}")
+                continue  # Try next URL
+            except Exception as e:
+                print(f"❌ Error from {base_url}: {e}")
+                if i == len(self.base_urls) - 1:  # Last URL
+                    raise HTTPException(status_code=500, detail=f"All base URLs failed. Last error: {e}")
+                continue  # Try next URL
+        
+        raise HTTPException(status_code=500, detail="All base URLs failed")
+    
+    async def fetch_drm_key(self, kid: str) -> Dict[str, Any]:
+        """Fetch DRM key for the given KID with fallback logic"""
+        params = {"kid": kid}
+        
+        # Try each base URL in order
+        for i, base_url in enumerate(self.base_urls):
+            try:
+                url = f"{base_url}/api/get-otp"
+                print(f"Trying DRM base URL {i+1}/{len(self.base_urls)}: {base_url}")
+                
+                async with httpx.AsyncClient() as client:
+                    response = await client.get(url, params=params, headers=self.get_headers())
+                    response.raise_for_status()
+                    
+                    # Handle compressed response
+                    try:
+                        data = response.json()
+                        print(f"✅ DRM Success with {base_url}")
+                        return data
+                    except Exception as e:
+                        print(f"Failed to parse DRM JSON response from {base_url}: {e}")
+                        # If JSON parsing fails, try to get raw content and decode
+                        content = response.content
+                        if content:
+                            # Try to decode as UTF-8 with error handling
+                            try:
+                                text_content = content.decode('utf-8')
+                                return json.loads(text_content)
+                            except (UnicodeDecodeError, json.JSONDecodeError):
+                                # If that fails, try latin-1
+                                try:
+                                    text_content = content.decode('latin-1')
+                                    return json.loads(text_content)
+                                except Exception as e2:
+                                    print(f"All DRM decoding attempts failed for {base_url}: {e2}")
+                                    continue  # Try next URL
+                        else:
+                            continue  # Try next URL
+                            
+            except httpx.HTTPStatusError as e:
+                print(f"❌ DRM HTTP error from {base_url}: {e.response.status_code}")
+                if i == len(self.base_urls) - 1:  # Last URL
+                    raise HTTPException(status_code=e.response.status_code, detail=f"All DRM base URLs failed. Last error: {e}")
+                continue  # Try next URL
+            except Exception as e:
+                print(f"❌ DRM Error from {base_url}: {e}")
+                if i == len(self.base_urls) - 1:  # Last URL
+                    raise HTTPException(status_code=500, detail=f"All DRM base URLs failed. Last error: {e}")
+                continue  # Try next URL
+        
+        raise HTTPException(status_code=500, detail="All DRM base URLs failed")
+    
+    def extract_kid_from_mpd(self, mpd_content: str) -> Optional[str]:
+        """Extract KID from MPD content"""
+        try:
+            # Look for all possible KIDs and return the one that works
+            all_kids = []
+            
+            # Pattern 1: cenc:default_KID
+            matches = re.findall(r'<cenc:default_KID>([^<]+)</cenc:default_KID>', mpd_content)
+            all_kids.extend(matches)
+            
+            # Pattern 2: kid="..."
+            matches = re.findall(r'kid="([^"]+)"', mpd_content)
+            all_kids.extend(matches)
+            
+            # Pattern 3: schemeIdUri="urn:uuid:..."
+            matches = re.findall(r'schemeIdUri="urn:uuid:([^"]+)"', mpd_content)
+            all_kids.extend(matches)
+            
+            # Remove duplicates while preserving order
+            seen = set()
+            unique_kids = []
+            for kid in all_kids:
+                if kid not in seen:
+                    seen.add(kid)
+                    unique_kids.append(kid)
+            
+            print(f"Found KIDs in MPD: {unique_kids}")
+            return unique_kids[0] if unique_kids else None
+                
+        except Exception as e:
+            print(f"Error extracting KID: {e}")
+        
+        return None
+    
+    async def fetch_mpd_content(self, mpd_url: str) -> str:
+        """Fetch MPD manifest content"""
+        async with httpx.AsyncClient() as client:
+            response = await client.get(mpd_url, headers={
+                "accept": "*/*",
+                "accept-language": "en-US,en;q=0.9",
+                "accept-encoding": "gzip, deflate, br, zstd",
+                "origin": "https://studyweb.live",
+                "referer": "https://studyweb.live/",
+                "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36"
+            })
+            response.raise_for_status()
+            
+            # Handle base64 encoded MPD content
+            content = response.text
+            if content.startswith("data:application/octet-stream;base64,"):
+                # Extract base64 part and decode
+                base64_part = content.split(",", 1)[1]
+                try:
+                    decoded_bytes = base64.b64decode(base64_part)
+                    # Try to decode as UTF-8, if it fails, try other encodings or return raw
+                    try:
+                        decoded_content = decoded_bytes.decode('utf-8')
+                        return decoded_content
+                    except UnicodeDecodeError:
+                        # Try latin-1 as fallback
+                        try:
+                            decoded_content = decoded_bytes.decode('latin-1')
+                            return decoded_content
+                        except UnicodeDecodeError:
+                            # Return as string representation of bytes if all else fails
+                            return decoded_bytes.decode('utf-8', errors='replace')
+                except Exception as e:
+                    print(f"Failed to decode base64 content: {e}")
+                    # Return the original content if decoding fails
+                    return content
+            
+            return content
+
+piewallah_api = PiewallahAPI()
+
+@app.get("/api/batches", response_model=BatchResponse)
+async def get_batches(page: int = Query(1, description="Page number"), limit: int = Query(692, description="Number of batches per page")):
+    """
+    Fetch batches from Heroku API
+    
+    This endpoint fetches batches from the Heroku API with pagination support.
+    Can fetch all batches or specific pages.
+    
+    Args:
+        page: Page number to fetch (default: 1)
+        limit: Number of batches per page (default: 692)
+        
+    Returns:
+        Batch data with pagination information
+    """
+    try:
+        if page == 0:  # Special case: fetch all batches
+            batches_data = await piewallah_api.fetch_all_batches()
+            return BatchResponse(**batches_data)
+        else:
+            batches_data = await piewallah_api.fetch_batches(page=page, limit=limit)
+            
+            # Extract pagination info if available
+            pagination = None
+            if 'pagination' in batches_data:
+                pagination = batches_data['pagination']
+            elif 'total' in batches_data or 'page' in batches_data:
+                pagination = {
+                    'page': page,
+                    'limit': limit,
+                    'total': batches_data.get('total', 0),
+                    'pages': batches_data.get('pages', 0)
+                }
+            
+            return BatchResponse(
+                success=batches_data.get('success', True),
+                data=batches_data.get('data', batches_data),
+                pagination=pagination
+            )
+            
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code, detail=f"Batches API request failed: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+@app.get("/api/batch/{batchId}/details", response_model=BatchResponse)
+async def get_batch_details(batchId: str):
+    """
+    Fetch detailed information for a specific batch
+    
+    This endpoint fetches detailed information for a specific batch from the Heroku API.
+    
+    Args:
+        batchId: The ID of the batch to fetch details for
+        
+    Returns:
+        Detailed batch information
+    """
+    try:
+        batch_data = await piewallah_api.fetch_batch_details(batchId)
+        
+        return BatchResponse(
+            success=batch_data.get('success', True),
+            data=batch_data.get('data', batch_data),
+            pagination=None
+        )
+            
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 404:
+            raise HTTPException(status_code=404, detail=f"Batch with ID '{batchId}' not found")
+        raise HTTPException(status_code=e.response.status_code, detail=f"Batch details API request failed: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+@app.get("/api/video", response_model=VideoResponse)
+async def get_video(
+    batchId: str = Query(..., description="Batch ID"),
+    subjectId: str = Query(..., description="Subject ID"), 
+    childId: str = Query(..., description="Child ID")
+):
+    """
+    Fetch video content including stream URL and DRM keys
+    
+    This endpoint combines video URL fetching and DRM key retrieval into a single response.
+    
+    Args:
+        batchId: The batch identifier
+        subjectId: The subject identifier  
+        childId: The child identifier
+        
+    Returns:
+        Combined video data with stream URL and DRM information
+    """
+    try:
+        # Fetch video URL first
+        video_data = await piewallah_api.fetch_video_url(batchId, subjectId, childId)
+        
+        if not video_data.get("success"):
+            raise HTTPException(status_code=400, detail="Failed to fetch video URL")
+        
+        data = video_data.get("data", {})
+        mpd_url = data.get("url")
+        signed_url = data.get("signedUrl", "")
+        
+        if not mpd_url:
+            raise HTTPException(status_code=404, detail="Video URL not found")
+        
+        # Construct full stream URL
+        full_stream_url = f"{mpd_url}{signed_url}"
+        
+        # Fetch MPD content to extract KID
+        try:
+            mpd_content = await piewallah_api.fetch_mpd_content(full_stream_url)
+            
+            # Extract all possible KIDs from MPD
+            all_kids = []
+            
+            # Pattern 1: cenc:default_KID
+            matches = re.findall(r'<cenc:default_KID>([^<]+)</cenc:default_KID>', mpd_content)
+            all_kids.extend(matches)
+            
+            # Pattern 2: kid="..."
+            matches = re.findall(r'kid="([^"]+)"', mpd_content)
+            all_kids.extend(matches)
+            
+            # Pattern 3: schemeIdUri="urn:uuid:..."
+            matches = re.findall(r'schemeIdUri="urn:uuid:([^"]+)"', mpd_content)
+            all_kids.extend(matches)
+            
+            # Pattern 4: Any UUID patterns
+            matches = re.findall(r'([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})', mpd_content.lower())
+            all_kids.extend(matches)
+            
+            # Remove duplicates
+            seen = set()
+            unique_kids = []
+            for kid in all_kids:
+                if kid not in seen:
+                    seen.add(kid)
+                    unique_kids.append(kid)
+            
+            print(f"Found KIDs in MPD: {unique_kids}")
+            
+            # Test each KID to find one that works
+            working_kid = None
+            working_key = None
+            for test_kid in unique_kids:
+                try:
+                    drm_test = await piewallah_api.fetch_drm_key(test_kid)
+                    clear_keys = drm_test.get("clearKeys", {})
+                    
+                    # Check if the exact KID is in the response
+                    if test_kid in clear_keys:
+                        working_kid = test_kid
+                        working_key = clear_keys[test_kid]
+                        print(f"✅ Found working KID (exact): {test_kid}")
+                        break
+                    # Check for KID without hyphens (format difference)
+                    elif test_kid.replace("-", "") in clear_keys:
+                        working_kid = test_kid.replace("-", "")
+                        working_key = clear_keys[test_kid.replace("-", "")]
+                        print(f"✅ Found working KID (format adjusted): {working_kid}")
+                        break
+                    # Check if any key in response matches our KID (with/without hyphens)
+                    else:
+                        for response_kid, response_key in clear_keys.items():
+                            if response_kid.replace("-", "") == test_kid.replace("-", ""):
+                                working_kid = response_kid
+                                working_key = response_key
+                                print(f"✅ Found matching KID: {working_kid}")
+                                break
+                        if working_kid:
+                            break
+                except Exception as e:
+                    print(f"KID {test_kid} failed: {e}")
+                    continue
+            
+            kid = working_kid
+            if not kid:
+                print("No working KID found in MPD")
+                
+        except Exception as e:
+            print(f"Failed to fetch MPD content: {e}")
+            kid = None
+        
+        # Fetch DRM key if KID is available
+        drm_info = None
+        if kid:
+            # If we already have the working key from the search above, use it
+            if 'working_key' in locals() and working_key:
+                drm_info = {
+                    "kid": kid,
+                    "key": working_key
+                }
+                print(f"✅ Using pre-found DRM key for {kid}")
+            else:
+                # Otherwise, fetch it again
+                try:
+                    drm_data = await piewallah_api.fetch_drm_key(kid)
+                    clear_keys = drm_data.get("clearKeys", {})
+                    
+                    # Check if the exact KID is in the response
+                    if kid in clear_keys:
+                        drm_info = {
+                            "kid": kid,
+                            "key": clear_keys[kid]
+                        }
+                    else:
+                        # Try to find a matching key (with/without hyphens)
+                        for response_kid, response_key in clear_keys.items():
+                            if response_kid.replace("-", "") == kid.replace("-", ""):
+                                drm_info = {
+                                    "kid": response_kid,  # Use the actual KID from response
+                                    "key": response_key
+                                }
+                                print(f"✅ Found matching DRM key: {response_kid}")
+                                break
+                        
+                        if not drm_info:
+                            print(f"No DRM key found for any KID variant")
+                            
+
+                except Exception as e:
+                    print(f"Failed to fetch DRM key: {e}")
+                    drm_info = None
+        
+        # Construct response
+        response_data = {
+            "success": True,
+            "data": data,
+            "stream_url": full_stream_url,
+            "url_type": data.get("urlType", "penpencilvdo"),
+            "drm": drm_info
+        }
+        
+        return VideoResponse(**response_data)
+        
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code, detail=f"API request failed: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+@app.get("/api/jwt/{token}", response_model=JWTResponse)
+async def decode_jwt_token(token: str):
+    """
+    Decode JWT token and provide detailed information
+    
+    This endpoint decodes JWT tokens without requiring a secret key and provides:
+    - Header information
+    - Payload/claims
+    - Signature details
+    - Token validation info
+    - Expiration and timing details
+    
+    Args:
+        token: The JWT token to decode (can be provided in URL path)
+        
+    Returns:
+        Detailed JWT token information
+    """
+    try:
+        # Remove any URL encoding or whitespace
+        token = token.strip().replace("%2E", ".").replace("%2F", "/").replace("%2B", "+")
+        
+        # Check if token has 3 parts
+        parts = token.split('.')
+        if len(parts) != 3:
+            raise HTTPException(status_code=400, detail="Invalid JWT format. Token must have 3 parts separated by dots")
+        
+        header_part, payload_part, signature_part = parts
+        
+        # Decode header
+        try:
+            # Add padding if needed
+            header_part_padded = header_part + '=' * (-len(header_part) % 4)
+            header_decoded = base64.urlsafe_b64decode(header_part_padded)
+            header_data = json.loads(header_decoded.decode('utf-8'))
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Failed to decode JWT header: {str(e)}")
+        
+        # Decode payload
+        try:
+            # Add padding if needed
+            payload_part_padded = payload_part + '=' * (-len(payload_part) % 4)
+            payload_decoded = base64.urlsafe_b64decode(payload_part_padded)
+            payload_data = json.loads(payload_decoded.decode('utf-8'))
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Failed to decode JWT payload: {str(e)}")
+        
+        # Analyze token information
+        token_info = {}
+        current_time = int(__import__('time').time())
+        
+        # Check expiration
+        if 'exp' in payload_data:
+            exp_time = payload_data['exp']
+            token_info['expiration'] = {
+                'timestamp': exp_time,
+                'datetime': __import__('datetime').datetime.fromtimestamp(exp_time).isoformat(),
+                'is_expired': current_time > exp_time,
+                'time_remaining': exp_time - current_time if current_time <= exp_time else 0
+            }
+        
+        # Check not before
+        if 'nbf' in payload_data:
+            nbf_time = payload_data['nbf']
+            token_info['not_before'] = {
+                'timestamp': nbf_time,
+                'datetime': __import__('datetime').datetime.fromtimestamp(nbf_time).isoformat(),
+                'is_valid_now': current_time >= nbf_time
+            }
+        
+        # Check issued at
+        if 'iat' in payload_data:
+            iat_time = payload_data['iat']
+            token_info['issued_at'] = {
+                'timestamp': iat_time,
+                'datetime': __import__('datetime').datetime.fromtimestamp(iat_time).isoformat(),
+                'time_ago': current_time - iat_time
+            }
+        
+        # Check subject
+        if 'sub' in payload_data:
+            token_info['subject'] = payload_data['sub']
+        
+        # Check issuer
+        if 'iss' in payload_data:
+            token_info['issuer'] = payload_data['iss']
+        
+        # Check audience
+        if 'aud' in payload_data:
+            token_info['audience'] = payload_data['aud']
+        
+        # Check token ID
+        if 'jti' in payload_data:
+            token_info['jwt_id'] = payload_data['jti']
+        
+        # Analyze algorithm
+        if 'alg' in header_data:
+            token_info['algorithm'] = header_data['alg']
+        
+        # Analyze token type
+        if 'typ' in header_data:
+            token_info['token_type'] = header_data['typ']
+        
+        # Token structure info
+        token_info['structure'] = {
+            'header_length': len(header_part),
+            'payload_length': len(payload_part),
+            'signature_length': len(signature_part),
+            'total_length': len(token)
+        }
+        
+        # Common claims analysis
+        common_claims = ['name', 'email', 'role', 'scope', 'permissions', 'userId', 'user_id']
+        found_claims = {}
+        for claim in common_claims:
+            if claim in payload_data:
+                found_claims[claim] = payload_data[claim]
+        
+        if found_claims:
+            token_info['common_claims'] = found_claims
+        
+        # Signature info (without verification)
+        token_info['signature'] = {
+            'present': len(signature_part) > 0,
+            'length': len(signature_part),
+            'algorithm': header_data.get('alg', 'unknown'),
+            'note': 'Signature is present but not verified (no secret key provided)'
+        }
+        
+        return JWTResponse(
+            success=True,
+            header=header_data,
+            payload=payload_data,
+            signature=signature_part,
+            token_info=token_info
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to decode JWT token: {str(e)}")
+
+@app.get("/api/jwt", response_model=JWTResponse)
+async def decode_jwt_query(token: str = Query(..., description="JWT token to decode")):
+    """
+    Decode JWT token via query parameter (alternative to path parameter)
+    
+    Args:
+        token: JWT token as query parameter
+        
+    Returns:
+        Detailed JWT token information
+    """
+    return await decode_jwt_token(token)
+
+@app.get("/")
+async def root():
+    return {
+        "message": "Piewallah Video API", 
+        "version": "2.0.0", 
+        "status": "running",
+        "description": "Complete API for video streaming, batch management, and JWT decoding",
+        "endpoints": {
+            "video": "/api/video?batchId=&subjectId=&childId=",
+            "batches": "/api/batches?page=1&limit=692",
+            "all_batches": "/api/batches?page=0",
+            "batch_details": "/api/batch/{batchId}/details",
+            "jwt_decode_path": "/api/jwt/{token}",
+            "jwt_decode_query": "/api/jwt?token=",
+            "docs": "/api",
+            "health": "/health"
+        }
+    }
+
+@app.get("/api")
+async def api_documentation():
+    """
+    Comprehensive API Documentation
+    
+    This endpoint provides complete documentation for all available endpoints
+    including parameters, examples, and response formats.
+    """
+    return {
+        "title": "Piewallah Video API Documentation",
+        "version": "2.0.0",
+        "description": "Complete API for video streaming, batch management, and JWT decoding",
+        "base_url": "http://localhost:8000",
+        "endpoints": {
+            "video_api": {
+                "endpoint": "/api/video",
+                "method": "GET",
+                "description": "Fetch video content with DRM keys from studyweb.live API",
+                "authentication": "Required (tokens from .env)",
+                "parameters": {
+                    "batchId": {
+                        "type": "string",
+                        "required": True,
+                        "description": "Batch ID from batches list",
+                        "example": "67be1ea9e92878bc16923fe8"
+                    },
+                    "subjectId": {
+                        "type": "string", 
+                        "required": True,
+                        "description": "Subject ID from batch details",
+                        "example": "5f709c26796f410011b7b80b"
+                    },
+                    "childId": {
+                        "type": "string",
+                        "required": True,
+                        "description": "Child ID for specific video",
+                        "example": "695757705590a2c154a8ca27"
+                    }
+                },
+                "example_request": "/api/video?batchId=67be1ea9e92878bc16923fe8&subjectId=5f709c26796f410011b7b80b&childId=695757705590a2c154a8ca27",
+                "example_response": {
+                    "success": True,
+                    "data": {
+                        "url": "https://sec-prod-mediacdn.pw.live/.../master.mpd",
+                        "signedUrl": "?URLPrefix=...&Expires=...&KeyName=pw-prod-key&Signature=...",
+                        "urlType": "penpencilvdo",
+                        "videoContainer": "DASH",
+                        "scheduleInfo": {
+                            "startTime": "2026-01-09T11:30:00.000Z",
+                            "endTime": "2026-01-09T12:34:18.801Z"
+                        }
+                    },
+                    "stream_url": "https://sec-prod-mediacdn.pw.live/.../master.mpd?URLPrefix=...",
+                    "drm": {
+                        "kid": "7c4ffcd57072d39995adf6cae1b50359",
+                        "key": "676c5f8bf5af7259c0de389a7f133046"
+                    }
+                },
+                "features": [
+                    "Multiple base URL fallbacks",
+                    "Dynamic DRM key extraction",
+                    "MPD manifest parsing",
+                    "Error handling"
+                ]
+            },
+            "batches_api": {
+                "endpoint": "/api/batches",
+                "method": "GET",
+                "description": "Fetch list of all available batches",
+                "authentication": "Not required",
+                "parameters": {
+                    "page": {
+                        "type": "integer",
+                        "required": False,
+                        "default": 1,
+                        "description": "Page number for pagination",
+                        "example": 1
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "required": False,
+                        "default": 692,
+                        "description": "Number of batches per page",
+                        "example": 10
+                    }
+                },
+                "special_endpoints": {
+                    "all_batches": {
+                        "url": "/api/batches?page=0",
+                        "description": "Fetch all batches without pagination"
+                    }
+                },
+                "example_request": "/api/batches?page=1&limit=10",
+                "example_response": {
+                    "success": True,
+                    "data": [
+                        {
+                            "_id": "6789f904f69b15eb632db640",
+                            "name": "Lakshya JEE 2.0 2026",
+                            "byName": "For JEE Aspirants",
+                            "language": "Hinglish",
+                            "exam": "IIT-JEE",
+                            "class": "12",
+                            "start_date": "2025-06-10",
+                            "end_date": "2026-06-30"
+                        }
+                    ],
+                    "pagination": {
+                        "page": 1,
+                        "limit": 10,
+                        "total": 692
+                    }
+                }
+            },
+            "batch_details_api": {
+                "endpoint": "/api/batch/{batchId}/details",
+                "method": "GET",
+                "description": "Fetch detailed information for a specific batch",
+                "authentication": "Not required",
+                "parameters": {
+                    "batchId": {
+                        "type": "string",
+                        "required": True,
+                        "description": "Batch ID from batches list",
+                        "example": "67ebbb8fbe321bd5247df0ba"
+                    }
+                },
+                "example_request": "/api/batch/67ebbb8fbe321bd5247df0ba/details",
+                "example_response": {
+                    "success": True,
+                    "data": {
+                        "_id": "67ebbb8fbe321bd5247df0ba",
+                        "name": "UPSC CSE 2026 Foundation",
+                        "description": "Complete foundation course for UPSC CSE 2026",
+                        "language": "Hinglish",
+                        "exam": "UPSC",
+                        "subjects": [
+                            {
+                                "_id": "67f3be806b0ca88c8b3f2b52",
+                                "subject": "Environment",
+                                "lectureCount": 3,
+                                "displayOrder": 2
+                            }
+                        ],
+                        "fee": {
+                            "amount": 0,
+                            "currency": "INR"
+                        }
+                    }
+                }
+            },
+            "jwt_decoder_api": {
+                "path_parameter": {
+                    "endpoint": "/api/jwt/{token}",
+                    "method": "GET",
+                    "description": "Decode JWT token via path parameter",
+                    "authentication": "Not required",
+                    "parameters": {
+                        "token": {
+                            "type": "string",
+                            "required": True,
+                            "description": "JWT token to decode",
+                            "example": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                        }
+                    },
+                    "example_request": "/api/jwt/eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI2OTYxNDQxYzcwY2U2NzVjNjRiMTA4NWQiLCJuYW1lIjoiVXRrYXJzaCAiLCJpYXQiOjE3Njc5ODIxMDksImV4cCI6MTc2OTI3ODEwOX0.Od-Xsge4x34OWi5CZ3La-SHXfVvYhZXaZ_9YxvkCt10"
+                },
+                "query_parameter": {
+                    "endpoint": "/api/jwt",
+                    "method": "GET",
+                    "description": "Decode JWT token via query parameter",
+                    "authentication": "Not required",
+                    "parameters": {
+                        "token": {
+                            "type": "string",
+                            "required": True,
+                            "description": "JWT token to decode",
+                            "example": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                        }
+                    },
+                    "example_request": "/api/jwt?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                },
+                "example_response": {
+                    "success": True,
+                    "header": {
+                        "alg": "HS256",
+                        "typ": "JWT"
+                    },
+                    "payload": {
+                        "userId": "6961441c70ce675c64b1085d",
+                        "name": "Utkarsh",
+                        "iat": 1767982109,
+                        "exp": 1769278109
+                    },
+                    "token_info": {
+                        "expiration": {
+                            "timestamp": 1769278109,
+                            "datetime": "2026-01-24T23:38:29",
+                            "is_expired": False,
+                            "time_remaining": 1291349
+                        },
+                        "algorithm": "HS256",
+                        "token_type": "JWT"
+                    }
+                }
+            },
+            "health_check": {
+                "endpoint": "/health",
+                "method": "GET",
+                "description": "API health check endpoint",
+                "authentication": "Not required",
+                "example_request": "/health",
+                "example_response": {
+                    "status": "healthy",
+                    "service": "piewallah-api"
+                }
+            }
+        },
+        "error_handling": {
+            "description": "All endpoints return appropriate HTTP status codes and error messages",
+            "common_errors": {
+                "400": "Bad Request - Invalid parameters",
+                "404": "Not Found - Resource not found",
+                "500": "Internal Server Error - Server error"
+            }
+        },
+        "base_urls_fallback": {
+            "description": "Video API uses multiple base URLs with automatic fallback",
+            "urls": [
+                "https://studyweb.live (primary)",
+                "https://studymeta.in (fallback 1)",
+                "https://pwthor.site (fallback 2)"
+            ]
+        },
+        "authentication": {
+            "video_api": {
+                "required": True,
+                "method": "Bearer tokens via cookies",
+                "env_variables": [
+                    "ACCESS_TOKEN",
+                    "REFRESH_TOKEN", 
+                    "ANON_ID"
+                ]
+            },
+            "other_apis": {
+                "required": False,
+                "description": "Batches and JWT decoder APIs don't require authentication"
+            }
+        },
+        "usage_examples": {
+            "complete_workflow": [
+                "1. GET /api/batches - Get list of all batches",
+                "2. GET /api/batch/{batchId}/details - Get batch details and subjects",
+                "3. GET /api/video?batchId=&subjectId=&childId= - Get video with DRM keys",
+                "4. GET /api/jwt/{token} - Decode authentication tokens if needed"
+            ]
+        }
+    }
+
+@app.get("/health")
+async def health_check():
+    """
+    Health check endpoint with video API status monitoring
+    
+    This endpoint checks the health of the service and tests all video API base URLs.
+    If all video APIs fail, it shows offline status.
+    """
+    video_api_status = {}
+    
+    # Test each video API base URL
+    test_batch_id = "67be1ea9e92878bc16923fe8"
+    test_subject_id = "5f709c26796f410011b7b80b"
+    test_child_id = "695757705590a2c154a8ca27"
+    
+    for base_url in piewallah_api.base_urls:
+        try:
+            url = f"{base_url}/api/get-video-url"
+            params = {
+                "batchId": test_batch_id,
+                "subjectId": test_subject_id,
+                "childId": test_child_id
+            }
+            
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.get(url, params=params, headers=piewallah_api.get_headers())
+                if response.status_code == 200:
+                    video_api_status[base_url] = "online"
+                else:
+                    # Handle 307 redirects as working (studymeta.in and pwthor.site redirect to auth)
+                    if response.status_code == 307:
+                        video_api_status[base_url] = "online_redirect"
+                    else:
+                        video_api_status[base_url] = f"error_{response.status_code}"
+        except Exception as e:
+            video_api_status[base_url] = "offline"
+    
+    # Check if all video APIs failed
+    all_failed = all(status in ["offline", "error_404", "error_500", "error_401", "error_403"] for status in video_api_status.values())
+    
+    if all_failed:
+        return {
+            "status": "offline",
+            "service": "piewallah-api",
+            "message": "LIBI LIBI !!!",
+            "video_apis": video_api_status,
+            "all_apis_failed": True,
+            "description": "All video APIs are offline"
+        }
+    else:
+        return {
+            "status": "healthy",
+            "service": "piewallah-api",
+            "video_apis": video_api_status,
+            "all_apis_failed": False,
+            "description": "Service is running with at least one video API online"
+        }
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
