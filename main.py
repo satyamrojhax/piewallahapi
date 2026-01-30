@@ -50,6 +50,12 @@ class VideoURLResponse(BaseModel):
     data: Dict[str, Any]
     errors: Optional[str] = None
 
+class DeltaStudyVideoResponse(BaseModel):
+    video_url: Optional[str] = None
+    url_type: Optional[str] = None
+    drm: Optional[Dict[str, str]] = None
+    proxy_url: Optional[str] = None
+
 class JWTResponse(BaseModel):
     success: bool
     header: Dict[str, Any]
@@ -404,6 +410,80 @@ class PiewallahAPI:
                     # The key is returned as base64 data
                     return key_response.text
             return response.text
+    
+    async def fetch_deltastudy_video_url(self, batch_id: str, child_id: str) -> Dict[str, Any]:
+        """Fetch video URL from deltastudy.site API"""
+        url = "https://deltastudy.site/api/videosuper"
+        params = {
+            "batchId": batch_id,
+            "childId": child_id
+        }
+        
+        headers = {
+            "accept": "*/*",
+            "accept-language": "en-GB,en-US;q=0.9,en;q=0.8",
+            "priority": "u=1, i",
+            "sec-ch-ua": '"Not(A:Brand";v="8", "Chromium";v="144", "Google Chrome";v="144"',
+            "sec-ch-ua-mobile": "?1",
+            "sec-ch-ua-platform": '"Android"',
+            "sec-fetch-dest": "empty",
+            "sec-fetch-mode": "cors",
+            "sec-fetch-site": "same-origin",
+            "user-agent": "Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Mobile Safari/537.36"
+        }
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, params=params, headers=headers)
+            response.raise_for_status()
+            return response.json()
+    
+    async def fetch_deltastudy_kid(self, mpd_url: str) -> Dict[str, Any]:
+        """Fetch KID from deltastudy.site API"""
+        url = "https://deltastudy.site/api/kid"
+        
+        headers = {
+            "accept": "*/*",
+            "accept-language": "en-GB,en-US;q=0.9,en;q=0.8",
+            "content-type": "application/json",
+            "priority": "u=1, i",
+            "sec-ch-ua": '"Not(A:Brand";v="8", "Chromium";v="144", "Google Chrome";v="144"',
+            "sec-ch-ua-mobile": "?1",
+            "sec-ch-ua-platform": '"Android"',
+            "sec-fetch-dest": "empty",
+            "sec-fetch-mode": "cors",
+            "sec-fetch-site": "same-origin",
+            "user-agent": "Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Mobile Safari/537.36"
+        }
+        
+        payload = {"mpdUrl": mpd_url}
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.post(url, json=payload, headers=headers)
+            response.raise_for_status()
+            return response.json()
+    
+    async def fetch_deltastudy_otp(self, kid: str) -> Dict[str, Any]:
+        """Fetch DRM key (OTP) from deltastudy.site API"""
+        url = f"https://deltastudy.site/api/otp"
+        params = {"kid": kid}
+        
+        headers = {
+            "accept": "*/*",
+            "accept-language": "en-GB,en-US;q=0.9,en;q=0.8",
+            "priority": "u=1, i",
+            "sec-ch-ua": '"Not(A:Brand";v="8", "Chromium";v="144", "Google Chrome";v="144"',
+            "sec-ch-ua-mobile": "?1",
+            "sec-ch-ua-platform": '"Android"',
+            "sec-fetch-dest": "empty",
+            "sec-fetch-mode": "cors",
+            "sec-fetch-site": "same-origin",
+            "user-agent": "Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Mobile Safari/537.36"
+        }
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, params=params, headers=headers)
+            response.raise_for_status()
+            return response.json()
 
 piewallah_api = PiewallahAPI()
 
@@ -831,7 +911,8 @@ async def root():
         "description": "Complete API for video streaming, batch management, JWT decoding, and HLS streaming",
         "endpoints": {
             "video": "/api/video?batchId=&subjectId=&childId=",
-            "video_url_details": "/api/video-url-details?parentid=&childid=",
+            "video_url_details": "/api/video-url-details?batchId=&childId=",
+            "video_url_details_external": "/api/video-url-details-external?parentid=&childid=",
             "hls": "/api/hls?parentid=&childid=&authorization=",
             "batches": "/api/batches?page=1&limit=692",
             "all_batches": "/api/batches?page=0",
@@ -997,6 +1078,43 @@ async def api_documentation():
             "video_url_details_api": {
                 "endpoint": "/api/video-url-details",
                 "method": "GET",
+                "description": "Fetch complete video URL details from deltastudy.site APIs (combined 3-in-1 endpoint)",
+                "authentication": "Not required",
+                "parameters": {
+                    "batchId": {
+                        "type": "string",
+                        "required": True,
+                        "description": "Batch ID",
+                        "example": "678a0324dab28c8848cc026f"
+                    },
+                    "childId": {
+                        "type": "string",
+                        "required": True,
+                        "description": "Child ID",
+                        "example": "68317eb12da436329a1dc5e6"
+                    }
+                },
+                "example_request": "/api/video-url-details?batchId=678a0324dab28c8848cc026f&childId=68317eb12da436329a1dc5e6",
+                "example_response": {
+                    "video_url": "https://sec-prod-mediacdn.pw.live/fd4e7eea-8645-486d-b629-c00c21823d2c/master.mpd?URLPrefix=aHR0cHM6Ly9zZWMtcHJvZC1tZWRpYWNkbi5wdy5saXZlL2ZkNGU3ZWVhLTg2NDUtNDg2ZC1iNjI5LWMwMGMyMTgyM2QyYw&Expires=1769794258&KeyName=pw-prod-key&Signature=wHdz5MxgbFjhR3FvxNrUAW9z7D-1Lc1LGM3YEhKHEb9PB64jNAukCeXu_5mQSMeyLWw50V6mWcPlQ56t6jXjAQ",
+                    "url_type": "penpencilvdo",
+                    "drm": {
+                        "kid": "d613fcf7fefefa4878136b236ba1f908",
+                        "key": "7489a93072d0b347a92df4c6d8f9fcf0"
+                    },
+                    "proxy_url": "https://spider.bhanuyadav.workers.dev/play/aHR0cHM6Ly9zZWMtcHJvZC1tZWRpYWNkbi5wdy5saXZlL2YzMjRlNzc2LTlhMmUtNGQ2Yy05N2Q0LTlmNzE5YzRlMDZhZS9tYXN0ZXIubXBkP1VSTFByZWZpeD1hSFIwY0hNNkx5OXpaV010Y0hKdlpDMXRaV1JwWVdOa2JpNXdkeTVzYVhabEwyWXpNalJsTnpjMkxUbGhNbVV0TkdRMll5MDVOMlEwTFRsbU56RTVZelJsTURaaFpRJkV4cGlyZXM9MTc2OTc5NDMwMiZLZXlOYW1lPXB3LXByb2Qta2V5JlNpZ25hdHVyZT1BSnVpUmJrOVpOUzdfV2tBWDR3NXQyQlFDUlFVUGRmdDA1dmJqZVpZX01KajRyVURHTkFpVHNCZENqZVA2djBNY2o4WHRUbzc5N0JCRzBaUXNnbS1DQQ==/main.m3u8"
+                },
+                "features": [
+                    "Combined 3 API calls in 1 request",
+                    "Automatic video URL fetching",
+                    "DRM KID extraction",
+                    "DRM key retrieval",
+                    "Complete streaming solution"
+                ]
+            },
+            "video_url_details_external_api": {
+                "endpoint": "/api/video-url-details-external",
+                "method": "GET",
                 "description": "Fetch video URL details from external API",
                 "authentication": "Not required",
                 "parameters": {
@@ -1013,7 +1131,7 @@ async def api_documentation():
                         "example": "69416be84090b507f5ce250a"
                     }
                 },
-                "example_request": "/api/video-url-details?parentid=67be1ea9e92878bc16923fe8&childid=69416be84090b507f5ce250a",
+                "example_request": "/api/video-url-details-external?parentid=67be1ea9e92878bc16923fe8&childid=69416be84090b507f5ce250a",
                 "example_response": {
                     "success": True,
                     "data": {
@@ -1178,14 +1296,113 @@ async def api_documentation():
                 "1. GET /api/batches - Get list of all batches",
                 "2. GET /api/batch/{batchId}/details - Get batch details and subjects",
                 "3. GET /api/video?batchId=&subjectId=&childId= - Get video with DRM keys",
-                "4. GET /api/video-url-details?parentid=&childid= - Get video URL details",
-                "5. GET /api/hls?parentid=&childid=&authorization= - Get HLS streaming URL and key",
-                "6. GET /api/jwt/{token} - Decode authentication tokens if needed"
+                "4. GET /api/video-url-details?batchId=&childId= - Get complete video details (3-in-1 deltastudy.site)",
+                "5. GET /api/video-url-details-external?parentid=&childid= - Get video URL details (external API)",
+                "6. GET /api/hls?parentid=&childid=&authorization= - Get HLS streaming URL and key",
+                "7. GET /api/jwt/{token} - Decode authentication tokens if needed"
             ]
         }
     }
 
-@app.get("/api/video-url-details", response_model=VideoURLResponse)
+@app.get("/api/video-url-details", response_model=DeltaStudyVideoResponse)
+async def get_video_url_details_deltastudy(
+    batchId: str = Query(..., description="Batch ID"),
+    childId: str = Query(..., description="Child ID")
+):
+    """
+    Fetch complete video URL details from deltastudy.site APIs
+    
+    This endpoint combines three API calls:
+    1. GET /api/videosuper - Get video URL
+    2. POST /api/kid - Get DRM KID from MPD URL
+    3. GET /api/otp - Get DRM key using KID
+    
+    Args:
+        batchId: The batch ID
+        childId: The child ID
+        
+    Returns:
+        Complete video details including URL and DRM information
+    """
+    try:
+        # Step 1: Fetch video URL from deltastudy.site
+        print(f"🎥 Fetching video URL for batchId: {batchId}, childId: {childId}")
+        video_response = await piewallah_api.fetch_deltastudy_video_url(batchId, childId)
+        
+        if not video_response.get("success"):
+            raise HTTPException(status_code=400, detail="Failed to fetch video URL from deltastudy.site")
+        
+        video_data = video_response.get("data", {})
+        video_url = video_data.get("video_url")
+        message = video_response.get("message")
+        timestamp = video_response.get("timestamp")
+        
+        if not video_url:
+            raise HTTPException(status_code=404, detail="Video URL not found in deltastudy.site response")
+        
+        print(f"✅ Got video URL: {video_url}")
+        
+        # Step 2: Fetch KID using the MPD URL
+        print(f"🔑 Fetching KID for MPD URL")
+        kid_response = await piewallah_api.fetch_deltastudy_kid(video_url)
+        
+        if not kid_response.get("success"):
+            raise HTTPException(status_code=400, detail="Failed to fetch KID from deltastudy.site")
+        
+        kid = kid_response.get("kid")
+        if not kid:
+            raise HTTPException(status_code=404, detail="KID not found in deltastudy.site response")
+        
+        print(f"✅ Got KID: {kid}")
+        
+        # Step 3: Fetch DRM key using KID
+        print(f"🔐 Fetching DRM key for KID: {kid}")
+        otp_response = await piewallah_api.fetch_deltastudy_otp(kid)
+        
+        if not otp_response.get("success"):
+            raise HTTPException(status_code=400, detail="Failed to fetch DRM key from deltastudy.site")
+        
+        drm_key = otp_response.get("key")
+        key_id = otp_response.get("keyid")
+        
+        if not drm_key:
+            raise HTTPException(status_code=404, detail="DRM key not found in deltastudy.site response")
+        
+        print(f"✅ Got DRM key: {drm_key}")
+        
+        # Generate HLS URL (proxy_url) using the same logic as /api/video
+        proxy_url = None
+        try:
+            print(f"🔄 Generating HLS URL (proxy_url)...")
+            proxy_url = await piewallah_api.generate_hls_url(video_url)
+            print(f"✅ HLS URL generated: {proxy_url}")
+        except Exception as e:
+            print(f"❌ Failed to generate HLS URL: {e}")
+            proxy_url = None
+        
+        # Construct response in the exact format requested
+        response_data = {
+            "video_url": video_url,
+            "url_type": "penpencilvdo",
+            "drm": {
+                "kid": key_id or kid,
+                "key": drm_key
+            },
+            "proxy_url": proxy_url
+        }
+        
+        print(f"🎉 Successfully fetched complete video details")
+        return DeltaStudyVideoResponse(**response_data)
+        
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code, detail=f"DeltaStudy API request failed: {e}")
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error in video URL details endpoint: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+@app.get("/api/video-url-details-external", response_model=VideoURLResponse)
 async def get_video_url_details(
     parentid: str = Query(..., description="Parent ID (batch ID)"),
     childid: str = Query(..., description="Child ID")
