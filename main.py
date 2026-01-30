@@ -599,7 +599,7 @@ async def get_video(
         # If we already have the working key from the search above, use it
         if 'working_key' in locals() and working_key:
             drm_info = {
-                "kid": kid,
+                "kid": kid.replace("-", ""),
                 "key": working_key
             }
             print(f"✅ Using pre-found DRM key for {kid}")
@@ -612,7 +612,7 @@ async def get_video(
                 # Check if the exact KID is in the response
                 if kid in clear_keys:
                     drm_info = {
-                        "kid": kid,
+                        "kid": kid.replace("-", ""),
                         "key": clear_keys[kid]
                     }
                 else:
@@ -620,7 +620,7 @@ async def get_video(
                     for response_kid, response_key in clear_keys.items():
                         if response_kid.replace("-", "") == kid.replace("-", ""):
                             drm_info = {
-                                "kid": kid,
+                                "kid": kid.replace("-", ""),
                                 "key": response_key
                             }
                             break
