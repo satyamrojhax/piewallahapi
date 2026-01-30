@@ -6,6 +6,7 @@ import base64
 import re
 import json
 import jwt
+import time
 from dotenv import load_dotenv
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
@@ -35,6 +36,19 @@ class VideoResponse(BaseModel):
     stream_url: Optional[str] = None
     url_type: Optional[str] = None
     drm: Optional[Dict[str, str]] = None
+    hls_url: Optional[str] = None
+
+class HLSResponse(BaseModel):
+    success: bool
+    data: Dict[str, Any]
+    hls_url: Optional[str] = None
+    hls_key: Optional[str] = None
+    errors: Optional[str] = None
+
+class VideoURLResponse(BaseModel):
+    success: bool
+    data: Dict[str, Any]
+    errors: Optional[str] = None
 
 class JWTResponse(BaseModel):
     success: bool
@@ -46,12 +60,7 @@ class JWTResponse(BaseModel):
 
 class PiewallahAPI:
     def __init__(self):
-        # Multiple base URLs with fallback logic
-        self.base_urls = [
-            os.getenv("API_BASE_URL", "https://studyweb.live"),  # Primary
-            "https://studymeta.in",  # Fallback 1
-            "https://pwthor.site"    # Fallback 2
-        ]
+        self.base_url = os.getenv("API_BASE_URL", "https://studyweb.live")
         self.access_token = os.getenv("ACCESS_TOKEN")
         self.refresh_token = os.getenv("REFRESH_TOKEN")
         self.anon_id = os.getenv("ANON_ID")
@@ -206,112 +215,31 @@ class PiewallahAPI:
                     raise HTTPException(status_code=500, detail="Empty response from batch details API")
     
     async def fetch_video_url(self, batch_id: str, subject_id: str, child_id: str) -> Dict[str, Any]:
-        """Fetch video URL from studyweb.live API with fallback logic"""
+        """Fetch video URL from studyweb.live API"""
         params = {
             "batchId": batch_id,
             "subjectId": subject_id,
             "childId": child_id
         }
         
-        # Try each base URL in order
-        for i, base_url in enumerate(self.base_urls):
-            try:
-                url = f"{base_url}/api/get-video-url"
-                print(f"Trying base URL {i+1}/{len(self.base_urls)}: {base_url}")
-                
-                async with httpx.AsyncClient() as client:
-                    response = await client.get(url, params=params, headers=self.get_headers())
-                    response.raise_for_status()
-                    
-                    # Handle compressed response
-                    try:
-                        data = response.json()
-                        print(f"✅ Success with {base_url}")
-                        return data
-                    except Exception as e:
-                        print(f"Failed to parse JSON response from {base_url}: {e}")
-                        # If JSON parsing fails, try to get raw content and decode
-                        content = response.content
-                        if content:
-                            # Try to decode as UTF-8 with error handling
-                            try:
-                                text_content = content.decode('utf-8')
-                                return json.loads(text_content)
-                            except (UnicodeDecodeError, json.JSONDecodeError):
-                                # If that fails, try latin-1
-                                try:
-                                    text_content = content.decode('latin-1')
-                                    return json.loads(text_content)
-                                except Exception as e2:
-                                    print(f"All decoding attempts failed for {base_url}: {e2}")
-                                    continue  # Try next URL
-                        else:
-                            continue  # Try next URL
-                            
-            except httpx.HTTPStatusError as e:
-                print(f"❌ HTTP error from {base_url}: {e.response.status_code}")
-                if i == len(self.base_urls) - 1:  # Last URL
-                    raise HTTPException(status_code=e.response.status_code, detail=f"All base URLs failed. Last error: {e}")
-                continue  # Try next URL
-            except Exception as e:
-                print(f"❌ Error from {base_url}: {e}")
-                if i == len(self.base_urls) - 1:  # Last URL
-                    raise HTTPException(status_code=500, detail=f"All base URLs failed. Last error: {e}")
-                continue  # Try next URL
+        url = f"{self.base_url}/api/get-video-url"
         
-        raise HTTPException(status_code=500, detail="All base URLs failed")
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, params=params, headers=self.get_headers())
+            response.raise_for_status()
+            return response.json()
     
     async def fetch_drm_key(self, kid: str) -> Dict[str, Any]:
-        """Fetch DRM key for the given KID with fallback logic"""
+        """Fetch DRM key for the given KID"""
+        # Remove dashes from KID
+        kid = kid.replace("-", "")
         params = {"kid": kid}
+        url = f"{self.base_url}/api/get-otp"
         
-        # Try each base URL in order
-        for i, base_url in enumerate(self.base_urls):
-            try:
-                url = f"{base_url}/api/get-otp"
-                print(f"Trying DRM base URL {i+1}/{len(self.base_urls)}: {base_url}")
-                
-                async with httpx.AsyncClient() as client:
-                    response = await client.get(url, params=params, headers=self.get_headers())
-                    response.raise_for_status()
-                    
-                    # Handle compressed response
-                    try:
-                        data = response.json()
-                        print(f"✅ DRM Success with {base_url}")
-                        return data
-                    except Exception as e:
-                        print(f"Failed to parse DRM JSON response from {base_url}: {e}")
-                        # If JSON parsing fails, try to get raw content and decode
-                        content = response.content
-                        if content:
-                            # Try to decode as UTF-8 with error handling
-                            try:
-                                text_content = content.decode('utf-8')
-                                return json.loads(text_content)
-                            except (UnicodeDecodeError, json.JSONDecodeError):
-                                # If that fails, try latin-1
-                                try:
-                                    text_content = content.decode('latin-1')
-                                    return json.loads(text_content)
-                                except Exception as e2:
-                                    print(f"All DRM decoding attempts failed for {base_url}: {e2}")
-                                    continue  # Try next URL
-                        else:
-                            continue  # Try next URL
-                            
-            except httpx.HTTPStatusError as e:
-                print(f"❌ DRM HTTP error from {base_url}: {e.response.status_code}")
-                if i == len(self.base_urls) - 1:  # Last URL
-                    raise HTTPException(status_code=e.response.status_code, detail=f"All DRM base URLs failed. Last error: {e}")
-                continue  # Try next URL
-            except Exception as e:
-                print(f"❌ DRM Error from {base_url}: {e}")
-                if i == len(self.base_urls) - 1:  # Last URL
-                    raise HTTPException(status_code=500, detail=f"All DRM base URLs failed. Last error: {e}")
-                continue  # Try next URL
-        
-        raise HTTPException(status_code=500, detail="All DRM base URLs failed")
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, params=params, headers=self.get_headers())
+            response.raise_for_status()
+            return response.json()
     
     def extract_kid_from_mpd(self, mpd_content: str) -> Optional[str]:
         """Extract KID from MPD content"""
@@ -385,6 +313,97 @@ class PiewallahAPI:
                     return content
             
             return content
+    
+    async def fetch_video_url_details(self, parentid: str, childid: str) -> Dict[str, Any]:
+        """Fetch video URL details from external API"""
+        url = "https://video-url-details-v0.bhanuyadav.workers.dev/video-url-details"
+        params = {
+            "parentid": parentid,
+            "childid": childid
+        }
+        
+        headers = {
+            "accept": "*/*",
+            "accept-language": "en-GB,en-US;q=0.9,en;q=0.8",
+            "priority": "u=1, i",
+            "sec-ch-ua": '"Not(A:Brand";v="8", "Chromium";v="144", "Google Chrome";v="144"',
+            "sec-ch-ua-mobile": "?1",
+            "sec-ch-ua-platform": '"Android"',
+            "sec-fetch-dest": "empty",
+            "sec-fetch-mode": "cors",
+            "sec-fetch-site": "cross-site",
+            "user-agent": "Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Mobile Safari/537.36"
+        }
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, params=params, headers=headers)
+            response.raise_for_status()
+            return response.json()
+    
+    async def generate_hls_url(self, video_url: str) -> str:
+        """Generate HLS URL from video URL"""
+        url = "https://spider.bhanuyadav.workers.dev/generate"
+        
+        headers = {
+            "accept": "*/*",
+            "accept-language": "en-GB,en-US;q=0.9,en;q=0.8",
+            "content-type": "application/json",
+            "priority": "u=1, i",
+            "sec-ch-ua": '"Not(A:Brand";v="8", "Chromium";v="144", "Google Chrome";v="144"',
+            "sec-ch-ua-mobile": "?1",
+            "sec-ch-ua-platform": '"Android"',
+            "sec-fetch-dest": "empty",
+            "sec-fetch-mode": "cors",
+            "sec-fetch-site": "cross-site",
+            "user-agent": "Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Mobile Safari/537.36"
+        }
+        
+        payload = {"url": video_url}
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.post(url, json=payload, headers=headers)
+            response.raise_for_status()
+            # The response is the HLS URL directly
+            return response.text.strip()
+    
+    async def fetch_hls_key(self, video_key: str, key: str, url_prefix: str, expires: str, key_name: str, signature: str, authorization: str) -> str:
+        """Fetch HLS encryption key"""
+        url = "https://api.penpencil.co/v1/videos/get-hls-key"
+        params = {
+            "videoKey": video_key,
+            "key": key,
+            "URLPrefix": url_prefix,
+            "Expires": expires,
+            "KeyName": key_name,
+            "Signature": signature,
+            "authorization": authorization
+        }
+        
+        headers = {
+            "accept": "*/*",
+            "accept-language": "en-GB,en-US;q=0.9,en;q=0.8",
+            "priority": "u=1, i",
+            "sec-ch-ua": '"Not(A:Brand";v="8", "Chromium";v="144", "Google Chrome";v="144"',
+            "sec-ch-ua-mobile": "?1",
+            "sec-ch-ua-platform": '"Android"',
+            "sec-fetch-dest": "empty",
+            "sec-fetch-mode": "cors",
+            "sec-fetch-site": "cross-site",
+            "user-agent": "Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Mobile Safari/537.36"
+        }
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, params=params, headers=headers)
+            response.raise_for_status()
+            # Follow redirect to get the actual key
+            if response.status_code == 301:
+                redirect_url = response.headers.get("location")
+                if redirect_url:
+                    key_response = await client.get(redirect_url)
+                    key_response.raise_for_status()
+                    # The key is returned as base64 data
+                    return key_response.text
+            return response.text
 
 piewallah_api = PiewallahAPI()
 
@@ -498,121 +517,143 @@ async def get_video(
         # Construct full stream URL
         full_stream_url = f"{mpd_url}{signed_url}"
         
-        # Fetch MPD content to extract KID
+    except httpx.HTTPStatusError as e:
+        # If studyweb.live fails with HTTP error, try fallback to external API
+        print(f"🔄 studyweb.live failed with {e.response.status_code}, trying external API fallback")
         try:
-            mpd_content = await piewallah_api.fetch_mpd_content(full_stream_url)
-            
-            # Extract all possible KIDs from MPD
-            all_kids = []
-            
-            # Pattern 1: cenc:default_KID
-            matches = re.findall(r'<cenc:default_KID>([^<]+)</cenc:default_KID>', mpd_content)
-            all_kids.extend(matches)
-            
-            # Pattern 2: kid="..."
-            matches = re.findall(r'kid="([^"]+)"', mpd_content)
-            all_kids.extend(matches)
-            
-            # Pattern 3: schemeIdUri="urn:uuid:..."
-            matches = re.findall(r'schemeIdUri="urn:uuid:([^"]+)"', mpd_content)
-            all_kids.extend(matches)
-            
-            # Pattern 4: Any UUID patterns
-            matches = re.findall(r'([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})', mpd_content.lower())
-            all_kids.extend(matches)
-            
-            # Remove duplicates
-            seen = set()
-            unique_kids = []
-            for kid in all_kids:
-                if kid not in seen:
-                    seen.add(kid)
-                    unique_kids.append(kid)
-            
-            print(f"Found KIDs in MPD: {unique_kids}")
-            
-            # Test each KID to find one that works
-            working_kid = None
-            working_key = None
-            for test_kid in unique_kids:
-                try:
-                    drm_test = await piewallah_api.fetch_drm_key(test_kid)
-                    clear_keys = drm_test.get("clearKeys", {})
-                    
-                    # Check if the exact KID is in the response
-                    if test_kid in clear_keys:
-                        working_kid = test_kid
-                        working_key = clear_keys[test_kid]
-                        print(f"✅ Found working KID (exact): {test_kid}")
-                        break
-                    # Check for KID without hyphens (format difference)
-                    elif test_kid.replace("-", "") in clear_keys:
-                        working_kid = test_kid.replace("-", "")
-                        working_key = clear_keys[test_kid.replace("-", "")]
-                        print(f"✅ Found working KID (format adjusted): {working_kid}")
-                        break
-                    # Check if any key in response matches our KID (with/without hyphens)
-                    else:
-                        for response_kid, response_key in clear_keys.items():
-                            if response_kid.replace("-", "") == test_kid.replace("-", ""):
-                                working_kid = response_kid
-                                working_key = response_key
-                                print(f"✅ Found matching KID: {working_kid}")
-                                break
-                        if working_kid:
-                            break
-                except Exception as e:
-                    print(f"KID {test_kid} failed: {e}")
-                    continue
-            
-            kid = working_kid
-            if not kid:
-                print("No working KID found in MPD")
+            external_data = await piewallah_api.fetch_video_url_details(batchId, childId)
+            if external_data.get("success"):
+                external_video_data = external_data.get("data", {})
+                mpd_url = external_video_data.get("url")
+                signed_url = external_video_data.get("signedUrl", "")
                 
-        except Exception as e:
-            print(f"Failed to fetch MPD content: {e}")
-            kid = None
-        
-        # Fetch DRM key if KID is available
-        drm_info = None
-        if kid:
-            # If we already have the working key from the search above, use it
-            if 'working_key' in locals() and working_key:
-                drm_info = {
-                    "kid": kid,
-                    "key": working_key
-                }
-                print(f"✅ Using pre-found DRM key for {kid}")
+                if mpd_url:
+                    full_stream_url = f"{mpd_url}{signed_url}"
+                    # Create a compatible data structure
+                    data = {
+                        "url": mpd_url,
+                        "signedUrl": signed_url,
+                        "urlType": "penpencilvdo",
+                        "scheduleInfo": external_video_data.get("scheduleInfo", {}),
+                        "videoContainer": "DASH",
+                        "isCmaf": False,
+                        "serverTime": int(time.time() * 1000),
+                        "cdnType": "Gcp"
+                    }
+                    print(f"✅ Successfully fetched data from external API")
+                else:
+                    raise HTTPException(status_code=404, detail="Video URL not found in external API")
             else:
-                # Otherwise, fetch it again
-                try:
-                    drm_data = await piewallah_api.fetch_drm_key(kid)
-                    clear_keys = drm_data.get("clearKeys", {})
-                    
-                    # Check if the exact KID is in the response
-                    if kid in clear_keys:
-                        drm_info = {
-                            "kid": kid,
-                            "key": clear_keys[kid]
-                        }
-                    else:
-                        # Try to find a matching key (with/without hyphens)
-                        for response_kid, response_key in clear_keys.items():
-                            if response_kid.replace("-", "") == kid.replace("-", ""):
-                                drm_info = {
-                                    "kid": response_kid,  # Use the actual KID from response
-                                    "key": response_key
-                                }
-                                print(f"✅ Found matching DRM key: {response_kid}")
-                                break
+                raise HTTPException(status_code=400, detail="External API also failed")
+        except Exception as e:
+            print(f"❌ External API fallback also failed: {e}")
+            raise HTTPException(status_code=500, detail="Both primary and external APIs failed")
+    except HTTPException:
+        # Re-raise HTTP exceptions from our own code
+        raise
+    except Exception as e:
+        print(f"❌ Unexpected error: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+        
+    # Fetch MPD content to extract KID
+    try:
+        mpd_content = await piewallah_api.fetch_mpd_content(full_stream_url)
+        
+        # Extract all possible KIDs from MPD
+        all_kids = []
+        
+        # Pattern 1: cenc:default_KID
+        matches = re.findall(r'<cenc:default_KID>([^<]+)</cenc:default_KID>', mpd_content)
+        all_kids.extend(matches)
+        
+        # Pattern 2: kid="..."
+        matches = re.findall(r'kid="([^"]+)"', mpd_content)
+        all_kids.extend(matches)
+        
+        # Pattern 3: schemeIdUri="urn:uuid:..."
+        matches = re.findall(r'schemeIdUri="urn:uuid:([^"]+)"', mpd_content)
+        all_kids.extend(matches)
+        
+        # Pattern 4: Any UUID patterns
+        matches = re.findall(r'([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})', mpd_content.lower())
+        all_kids.extend(matches)
+        
+        # Remove duplicates
+        all_kids = list(set(all_kids))
+        print(f"Found KIDs in MPD: {all_kids}")
+        
+        if not all_kids:
+            print("No KIDs found in MPD")
+            kid = None
+        else:
+            kid = all_kids[0]
+            print(f"Using KID: {kid}")
+            
+    except Exception as e:
+        print(f"Failed to fetch MPD content: {e}")
+        kid = None
+        
+    # Fetch DRM key if KID is available
+    drm_info = None
+    if kid:
+        # If we already have the working key from the search above, use it
+        if 'working_key' in locals() and working_key:
+            drm_info = {
+                "kid": kid,
+                "key": working_key
+            }
+            print(f"✅ Using pre-found DRM key for {kid}")
+        else:
+            # Otherwise, fetch it again
+            try:
+                drm_data = await piewallah_api.fetch_drm_key(kid)
+                clear_keys = drm_data.get("clearKeys", {})
+                
+                # Check if the exact KID is in the response
+                if kid in clear_keys:
+                    drm_info = {
+                        "kid": kid,
+                        "key": clear_keys[kid]
+                    }
+                else:
+                    # Try to find a matching key (with/without hyphens)
+                    for response_kid, response_key in clear_keys.items():
+                        if response_kid.replace("-", "") == kid.replace("-", ""):
+                            drm_info = {
+                                "kid": kid,
+                                "key": response_key
+                            }
+                            break
                         
-                        if not drm_info:
-                            print(f"No DRM key found for any KID variant")
-                            
-
-                except Exception as e:
-                    print(f"Failed to fetch DRM key: {e}")
-                    drm_info = None
+            except Exception as e:
+                print(f"Failed to fetch DRM key: {e}")
+                drm_info = None
+        
+        # Fetch HLS URL in background using batchId and childId
+        hls_url = None
+        try:
+            # First try to get HLS URL using the external API method
+            video_details = await piewallah_api.fetch_video_url_details(batchId, childId)
+            if video_details.get("success"):
+                video_data = video_details.get("data", {})
+                external_url = video_data.get("url")
+                external_signed_url = video_data.get("signedUrl", "")
+                if external_url:
+                    external_full_url = f"{external_url}{external_signed_url}"
+                    hls_url = await piewallah_api.generate_hls_url(external_full_url)
+                    print(f"✅ HLS URL generated via external API")
+        except Exception as e:
+            print(f"❌ External API method failed: {e}")
+        
+        # Fallback: Use existing stream_url if external API failed
+        if not hls_url:
+            try:
+                print(f"🔄 Falling back to existing stream_url for HLS generation")
+                hls_url = await piewallah_api.generate_hls_url(full_stream_url)
+                print(f"✅ HLS URL generated via fallback method")
+            except Exception as e:
+                print(f"❌ Fallback method also failed: {e}")
+                hls_url = None
         
         # Construct response
         response_data = {
@@ -620,15 +661,11 @@ async def get_video(
             "data": data,
             "stream_url": full_stream_url,
             "url_type": data.get("urlType", "penpencilvdo"),
-            "drm": drm_info
+            "drm": drm_info,
+            "hls_url": hls_url
         }
         
         return VideoResponse(**response_data)
-        
-    except httpx.HTTPStatusError as e:
-        raise HTTPException(status_code=e.response.status_code, detail=f"API request failed: {e}")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 @app.get("/api/jwt/{token}", response_model=JWTResponse)
 async def decode_jwt_token(token: str):
@@ -791,9 +828,11 @@ async def root():
         "message": "Piewallah Video API", 
         "version": "2.0.0", 
         "status": "running",
-        "description": "Complete API for video streaming, batch management, and JWT decoding",
+        "description": "Complete API for video streaming, batch management, JWT decoding, and HLS streaming",
         "endpoints": {
             "video": "/api/video?batchId=&subjectId=&childId=",
+            "video_url_details": "/api/video-url-details?parentid=&childid=",
+            "hls": "/api/hls?parentid=&childid=&authorization=",
             "batches": "/api/batches?page=1&limit=692",
             "all_batches": "/api/batches?page=0",
             "batch_details": "/api/batch/{batchId}/details",
@@ -815,7 +854,7 @@ async def api_documentation():
     return {
         "title": "Piewallah Video API Documentation",
         "version": "2.0.0",
-        "description": "Complete API for video streaming, batch management, and JWT decoding",
+        "description": "Complete API for video streaming, batch management, JWT decoding, and HLS streaming",
         "base_url": "http://localhost:8000",
         "endpoints": {
             "video_api": {
@@ -955,6 +994,87 @@ async def api_documentation():
                     }
                 }
             },
+            "video_url_details_api": {
+                "endpoint": "/api/video-url-details",
+                "method": "GET",
+                "description": "Fetch video URL details from external API",
+                "authentication": "Not required",
+                "parameters": {
+                    "parentid": {
+                        "type": "string",
+                        "required": True,
+                        "description": "Parent ID (batch ID)",
+                        "example": "67be1ea9e92878bc16923fe8"
+                    },
+                    "childid": {
+                        "type": "string",
+                        "required": True,
+                        "description": "Child ID",
+                        "example": "69416be84090b507f5ce250a"
+                    }
+                },
+                "example_request": "/api/video-url-details?parentid=67be1ea9e92878bc16923fe8&childid=69416be84090b507f5ce250a",
+                "example_response": {
+                    "success": True,
+                    "data": {
+                        "url": "https://sec-prod-mediacdn.pw.live/a433e1ca-53d8-4f91-b62d-73adfcdf19f6/master.mpd",
+                        "signedUrl": "?URLPrefix=...&Expires=...&KeyName=pw-prod-key&Signature=...",
+                        "drmDetails": null,
+                        "scheduleInfo": {
+                            "startTime": "2025-12-17T09:30:00.000Z",
+                            "endTime": "2025-12-17T11:16:28.617Z"
+                        },
+                        "dataFrom": "StudyMaxer"
+                    }
+                }
+            },
+            "hls_api": {
+                "endpoint": "/api/hls",
+                "method": "GET",
+                "description": "Generate HLS URL and fetch encryption key",
+                "authentication": "Optional (for HLS key fetching)",
+                "parameters": {
+                    "parentid": {
+                        "type": "string",
+                        "required": True,
+                        "description": "Parent ID (batch ID)",
+                        "example": "67be1ea9e92878bc16923fe8"
+                    },
+                    "childid": {
+                        "type": "string",
+                        "required": True,
+                        "description": "Child ID",
+                        "example": "69416be84090b507f5ce250a"
+                    },
+                    "authorization": {
+                        "type": "string",
+                        "required": False,
+                        "description": "Authorization token for HLS key fetching",
+                        "example": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9..."
+                    }
+                },
+                "example_request": "/api/hls?parentid=67be1ea9e92878bc16923fe8&childid=69416be84090b507f5ce250a&authorization=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
+                "example_response": {
+                    "success": True,
+                    "data": {
+                        "url": "https://sec-prod-mediacdn.pw.live/a433e1ca-53d8-4f91-b62d-73adfcdf19f6/master.mpd",
+                        "signedUrl": "?URLPrefix=...&Expires=...&KeyName=pw-prod-key&Signature=...",
+                        "drmDetails": null,
+                        "scheduleInfo": {
+                            "startTime": "2025-12-17T09:30:00.000Z",
+                            "endTime": "2025-12-17T11:16:28.617Z"
+                        }
+                    },
+                    "hls_url": "https://spider.bhanuyadav.workers.dev/play/aHR0cHM6Ly9zZWMtcHJvZC1tZWRpYWNkbi5wdy5saXZlL2E0MzNlMWNhLTUzZDgtNGY5MS1iNjJkLTczYWRmY2RmMTlmNi9tYXN0ZXIubXBkP1VSTFByZWZpeD1hSFIwY0hNNkx5OXpaV010Y0hKdlpDMXRaV1JwWVdOa2JpNXdkeTVzYVhabEwyRTBNek5sTVdOaExUVXpaRGd0TkdZNU1TMWlOakprTFRjellXUm1ZMlJtTVRsbU5nJkV4cGlyZXM9MTc2OTc4NzE4NSZLZXlOYW1lPXB3LXByb2Qta2V5JlNpZ25hdHVyZT1MLXU1OS1xeTM1Uk1sVDR6ektReG1TaTVVZHg1RmhuOU54ZThpeXRNNHI5aC1DTmdzZGpzN0VDdy1iOTRRTjFibUgtbkx6eW91N0dCU09uN1BJMTZBZw==/main.m3u8",
+                    "hls_key": "data:application/octet-stream;base64,jJVkue+pYHf+PEPhkHYAVA=="
+                },
+                "features": [
+                    "Automatic HLS URL generation",
+                    "Encryption key fetching",
+                    "Complete streaming solution",
+                    "Error handling"
+                ]
+            },
             "jwt_decoder_api": {
                 "path_parameter": {
                     "endpoint": "/api/jwt/{token}",
@@ -1058,10 +1178,136 @@ async def api_documentation():
                 "1. GET /api/batches - Get list of all batches",
                 "2. GET /api/batch/{batchId}/details - Get batch details and subjects",
                 "3. GET /api/video?batchId=&subjectId=&childId= - Get video with DRM keys",
-                "4. GET /api/jwt/{token} - Decode authentication tokens if needed"
+                "4. GET /api/video-url-details?parentid=&childid= - Get video URL details",
+                "5. GET /api/hls?parentid=&childid=&authorization= - Get HLS streaming URL and key",
+                "6. GET /api/jwt/{token} - Decode authentication tokens if needed"
             ]
         }
     }
+
+@app.get("/api/video-url-details", response_model=VideoURLResponse)
+async def get_video_url_details(
+    parentid: str = Query(..., description="Parent ID (batch ID)"),
+    childid: str = Query(..., description="Child ID")
+):
+    """
+    Fetch video URL details from external API
+    
+    This endpoint fetches video URL details including the signed URL and DRM information
+    from the external video-url-details API.
+    
+    Args:
+        parentid: The parent ID (batch ID)
+        childid: The child ID
+        
+    Returns:
+        Video URL details with signed URL and DRM information
+    """
+    try:
+        video_data = await piewallah_api.fetch_video_url_details(parentid, childid)
+        
+        return VideoURLResponse(
+            success=video_data.get("success", True),
+            data=video_data.get("data", video_data),
+            errors=None
+        )
+            
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code, detail=f"Video URL details API request failed: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+@app.get("/api/hls", response_model=HLSResponse)
+async def get_hls_url(
+    parentid: str = Query(..., description="Parent ID (batch ID)"),
+    childid: str = Query(..., description="Child ID"),
+    authorization: str = Query(None, description="Authorization token for HLS key")
+):
+    """
+    Generate HLS URL and fetch encryption key
+    
+    This endpoint combines video URL details fetching, HLS generation, and key retrieval
+    to provide a complete HLS streaming solution.
+    
+    Args:
+        parentid: The parent ID (batch ID)
+        childid: The child ID
+        authorization: Optional authorization token for fetching HLS key
+        
+    Returns:
+        HLS URL and encryption key information
+    """
+    try:
+        # Step 1: Fetch video URL details
+        video_data = await piewallah_api.fetch_video_url_details(parentid, childid)
+        
+        if not video_data.get("success"):
+            raise HTTPException(status_code=400, detail="Failed to fetch video URL details")
+        
+        data = video_data.get("data", {})
+        video_url = data.get("url")
+        signed_url = data.get("signedUrl", "")
+        
+        if not video_url:
+            raise HTTPException(status_code=404, detail="Video URL not found")
+        
+        # Step 2: Construct full video URL
+        full_video_url = f"{video_url}{signed_url}"
+        
+        # Step 3: Generate HLS URL
+        hls_url = await piewallah_api.generate_hls_url(full_video_url)
+        
+        # Step 4: Extract video key from URL for key fetching
+        video_key = None
+        if "/" in video_url:
+            # Extract video key from URL path (last UUID-like segment before master.mpd)
+            url_parts = video_url.split("/")
+            for part in url_parts:
+                if len(part) == 36 and "-" in part:  # UUID format
+                    video_key = part
+                    break
+        
+        hls_key = None
+        
+        # Step 5: Fetch HLS key if authorization is provided and video_key is found
+        if authorization and video_key:
+            try:
+                # Parse the signed URL parameters
+                url_params = {}
+                if signed_url.startswith("?"):
+                    param_string = signed_url[1:]  # Remove the leading '?'
+                    for param in param_string.split("&"):
+                        if "=" in param:
+                            key, value = param.split("=", 1)
+                            url_params[key] = value
+                
+                hls_key = await piewallah_api.fetch_hls_key(
+                    video_key=video_key,
+                    key="enc.key",
+                    url_prefix=url_params.get("URLPrefix", ""),
+                    expires=url_params.get("Expires", ""),
+                    key_name=url_params.get("KeyName", ""),
+                    signature=url_params.get("Signature", ""),
+                    authorization=authorization
+                )
+            except Exception as e:
+                print(f"Failed to fetch HLS key: {e}")
+                hls_key = None
+        
+        # Construct response
+        response_data = {
+            "success": True,
+            "data": data,
+            "hls_url": hls_url,
+            "hls_key": hls_key
+        }
+        
+        return HLSResponse(**response_data)
+        
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(status_code=e.response.status_code, detail=f"HLS API request failed: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 @app.get("/health")
 async def health_check():
