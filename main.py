@@ -8,7 +8,7 @@ import json
 import jwt
 import time
 from dotenv import load_dotenv
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import Optional, Dict, Any
 
 load_dotenv()
@@ -41,6 +41,8 @@ class VideoResponse(BaseModel):
     hls_url: Optional[str] = None
     powered_by: str = "SATYAM ROJHAX"
     only_used_for: str = "PIE WALLAH"
+    
+    model_config = ConfigDict(exclude_none=True)
 
 class HLSResponse(BaseModel):
     success: bool
@@ -573,7 +575,7 @@ async def get_batch_details(batchId: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
-@app.get("/api/video", response_model=VideoResponse)
+@app.get("/api/video", response_model=VideoResponse, response_model_exclude_none=True)
 async def get_video(
     batchId: str = Query(..., description="Batch ID"),
     subjectId: str = Query(..., description="Subject ID"), 
@@ -737,25 +739,39 @@ async def get_video(
     except Exception as e:
         print(f"❌ External API method failed: {e}")
         
-    # Fallback: Use existing stream_url if external API failed
-    if not hls_url:
-        try:
-            print(f"🔄 Falling back to existing stream_url for HLS generation")
-            hls_url = await piewallah_api.generate_hls_url(full_stream_url)
-            print(f" HLS URL generated via fallback method")
-        except Exception as e:
-            print(f"❌ Fallback method also failed: {e}")
-            hls_url = None
+    # Check if CloudFront URL is present (indicates live stream)
+    # If so, skip DRM lookup and HLS generation
+    is_live_stream = "cloudfront.net" in full_stream_url.lower() or (data.get("url", "") and "cloudfront.net" in data.get("url", "").lower())
+    
+    if is_live_stream:
+        print(f"🔴 CloudFront URL detected - this is a live stream, skipping DRM lookup and HLS generation")
+        # Don't include drm and hls_url fields in response for live streams
+        response_data = {
+            "success": True,
+            "data": data,
+            "stream_url": full_stream_url,
+            "url_type": data.get("urlType", "penpencilvdo")
+        }
+    else:
+        # Fallback: Use existing stream_url if external API failed
+        if not hls_url:
+            try:
+                print(f"🔄 Falling back to existing stream_url for HLS generation")
+                hls_url = await piewallah_api.generate_hls_url(full_stream_url)
+                print(f" HLS URL generated via fallback method")
+            except Exception as e:
+                print(f"❌ Fallback method also failed: {e}")
+                hls_url = None
         
-    # Construct response
-    response_data = {
-        "success": True,
-        "data": data,
-        "stream_url": full_stream_url,
-        "url_type": data.get("urlType", "penpencilvdo"),
-        "drm": drm_info,
-        "hls_url": hls_url
-    }
+        # Construct response with drm and hls_url for non-live streams
+        response_data = {
+            "success": True,
+            "data": data,
+            "stream_url": full_stream_url,
+            "url_type": data.get("urlType", "penpencilvdo"),
+            "drm": drm_info,
+            "hls_url": hls_url
+        }
     
     return VideoResponse(**response_data)
 
