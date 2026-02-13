@@ -29,6 +29,8 @@ class BatchResponse(BaseModel):
     data: Dict[str, Any]
     pagination: Optional[Dict[str, Any]] = None
     errors: Optional[str] = None
+    powered_by: str = "SATYAM ROJHAX"
+    only_used_for: str = "PIE WALLAH"
 
 class VideoResponse(BaseModel):
     success: bool
@@ -37,6 +39,8 @@ class VideoResponse(BaseModel):
     url_type: Optional[str] = None
     drm: Optional[Dict[str, str]] = None
     hls_url: Optional[str] = None
+    powered_by: str = "SATYAM ROJHAX"
+    only_used_for: str = "PIE WALLAH"
 
 class HLSResponse(BaseModel):
     success: bool
@@ -44,17 +48,23 @@ class HLSResponse(BaseModel):
     hls_url: Optional[str] = None
     hls_key: Optional[str] = None
     errors: Optional[str] = None
+    powered_by: str = "SATYAM ROJHAX"
+    only_used_for: str = "PIE WALLAH"
 
 class VideoURLResponse(BaseModel):
     success: bool
     data: Dict[str, Any]
     errors: Optional[str] = None
+    powered_by: str = "SATYAM ROJHAX"
+    only_used_for: str = "PIE WALLAH"
 
 class DeltaStudyVideoResponse(BaseModel):
     video_url: Optional[str] = None
     url_type: Optional[str] = None
     drm: Optional[Dict[str, str]] = None
     proxy_url: Optional[str] = None
+    powered_by: str = "SATYAM ROJHAX"
+    only_used_for: str = "PIE WALLAH"
 
 class JWTResponse(BaseModel):
     success: bool
@@ -63,6 +73,8 @@ class JWTResponse(BaseModel):
     signature: str
     token_info: Dict[str, Any]
     errors: Optional[str] = None
+    powered_by: str = "SATYAM ROJHAX"
+    only_used_for: str = "PIE WALLAH"
 
 class PiewallahAPI:
     def __init__(self):
@@ -642,8 +654,8 @@ async def get_video(
         # Extract all possible KIDs from MPD
         all_kids = []
         
-        # Pattern 1: cenc:default_KID
-        matches = re.findall(r'<cenc:default_KID>([^<]+)</cenc:default_KID>', mpd_content)
+        # Pattern 1: cenc:default_KID (handle multiline)
+        matches = re.findall(r'cenc:default_KID="([^"]+)"', mpd_content, re.IGNORECASE)
         all_kids.extend(matches)
         
         # Pattern 2: kid="..."
@@ -909,6 +921,8 @@ async def root():
         "version": "2.0.0", 
         "status": "running",
         "description": "Complete API for video streaming, batch management, JWT decoding, and HLS streaming",
+        "powered_by": "SATYAM ROJHAX",
+        "only_used_for": "PIE WALLAH",
         "endpoints": {
             "video": "/api/video?batchId=&subjectId=&childId=",
             "video_url_details": "/api/video-url-details?batchId=&childId=",
@@ -936,7 +950,9 @@ async def api_documentation():
         "title": "Piewallah Video API Documentation",
         "version": "2.0.0",
         "description": "Complete API for video streaming, batch management, JWT decoding, and HLS streaming",
-        "base_url": "http://localhost:8000",
+        "base_url": "https://piewallahapi.vercel.app",
+        "powered_by": "SATYAM ROJHAX",
+        "only_used_for": "PIE WALLAH",
         "endpoints": {
             "video_api": {
                 "endpoint": "/api/video",
@@ -1102,7 +1118,9 @@ async def api_documentation():
                         "kid": "d613fcf7fefefa4878136b236ba1f908",
                         "key": "7489a93072d0b347a92df4c6d8f9fcf0"
                     },
-                    "proxy_url": "https://spider.bhanuyadav.workers.dev/play/aHR0cHM6Ly9zZWMtcHJvZC1tZWRpYWNkbi5wdy5saXZlL2YzMjRlNzc2LTlhMmUtNGQ2Yy05N2Q0LTlmNzE5YzRlMDZhZS9tYXN0ZXIubXBkP1VSTFByZWZpeD1hSFIwY0hNNkx5OXpaV010Y0hKdlpDMXRaV1JwWVdOa2JpNXdkeTVzYVhabEwyWXpNalJsTnpjMkxUbGhNbVV0TkdRMll5MDVOMlEwTFRsbU56RTVZelJsTURaaFpRJkV4cGlyZXM9MTc2OTc5NDMwMiZLZXlOYW1lPXB3LXByb2Qta2V5JlNpZ25hdHVyZT1BSnVpUmJrOVpOUzdfV2tBWDR3NXQyQlFDUlFVUGRmdDA1dmJqZVpZX01KajRyVURHTkFpVHNCZENqZVA2djBNY2o4WHRUbzc5N0JCRzBaUXNnbS1DQQ==/main.m3u8"
+                    "proxy_url": "https://spider.bhanuyadav.workers.dev/play/aHR0cHM6Ly9zZWMtcHJvZC1tZWRpYWNkbi5wdy5saXZlL2YzMjRlNzc2LTlhMmUtNGQ2Yy05N2Q0LTlmNzE5YzRlMDZhZS9tYXN0ZXIubXBkP1VSTFByZWZpeD1hSFIwY0hNNkx5OXpaV010Y0hKdlpDMXRaV1JwWVdOa2JpNXdkeTVzYVhabEwyWXpNalJsTnpjMkxUbGhNbVV0TkdRMll5MDVOMlEwTFRsbU56RTVZelJsTURaaFpRJkV4cGlyZXM9MTc2OTc5NDMwMiZLZXlOYW1lPXB3LXByb2Qta2V5JlNpZ25hdHVyZT1BSnVpUmJrOVpOUzdfV2tBWDR3NXQyQlFDUlFVUGRmdDA1dmJqZVpZX01KajRyVURHTkFpVHNCZENqZVA2djBNY2o4WHRUbzc5N0JCRzBaUXNnbS1DQQ==/main.m3u8",
+                    "powered_by": "SATYAM ROJHAX",
+                    "only_used_for": "PIE WALLAH"
                 },
                 "features": [
                     "Combined 3 API calls in 1 request",
@@ -1573,7 +1591,9 @@ async def health_check():
             "message": "LIBI LIBI !!!",
             "video_apis": video_api_status,
             "all_apis_failed": True,
-            "description": "All video APIs are offline"
+            "description": "All video APIs are offline",
+            "powered_by": "SATYAM ROJHAX",
+            "only_used_for": "PIE WALLAH"
         }
     else:
         return {
@@ -1581,7 +1601,9 @@ async def health_check():
             "service": "piewallah-api",
             "video_apis": video_api_status,
             "all_apis_failed": False,
-            "description": "Service is running with at least one video API online"
+            "description": "Service is running with at least one video API online",
+            "powered_by": "SATYAM ROJHAX",
+            "only_used_for": "PIE WALLAH"
         }
 
 if __name__ == "__main__":
