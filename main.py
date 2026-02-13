@@ -654,8 +654,8 @@ async def get_video(
         # Extract all possible KIDs from MPD
         all_kids = []
         
-        # Pattern 1: cenc:default_KID (handle multiline)
-        matches = re.findall(r'cenc:default_KID="([^"]+)"', mpd_content, re.IGNORECASE)
+        # Pattern 1: cenc:default_KID
+        matches = re.findall(r'<cenc:default_KID>([^<]+)</cenc:default_KID>', mpd_content)
         all_kids.extend(matches)
         
         # Pattern 2: kid="..."
@@ -676,27 +676,16 @@ async def get_video(
         
         if not all_kids:
             print("No KIDs found in MPD")
-            kid = None
-        else:
-            kid = all_kids[0]
-            print(f"Using KID: {kid}")
             
     except Exception as e:
         print(f"Failed to fetch MPD content: {e}")
-        kid = None
         
     # Fetch DRM key if KID is available
     drm_info = None
-    if kid:
-        # If we already have the working key from the search above, use it
-        if 'working_key' in locals() and working_key:
-            drm_info = {
-                "kid": kid.replace("-", ""),
-                "key": working_key
-            }
-            print(f"✅ Using pre-found DRM key for {kid}")
-        else:
-            # Otherwise, fetch it again
+    if all_kids:
+        # Try each KID until we find a working one
+        for kid in all_kids:
+            print(f"Trying KID: {kid}")
             try:
                 drm_data = await piewallah_api.fetch_drm_key(kid)
                 clear_keys = drm_data.get("clearKeys", {})
@@ -707,6 +696,8 @@ async def get_video(
                         "kid": kid.replace("-", ""),
                         "key": clear_keys[kid]
                     }
+                    print(f"✅ Found working DRM key for {kid}")
+                    break
                 else:
                     # Try to find a matching key (with/without hyphens)
                     for response_kid, response_key in clear_keys.items():
@@ -715,49 +706,58 @@ async def get_video(
                                 "kid": kid.replace("-", ""),
                                 "key": response_key
                             }
+                            print(f"✅ Found working DRM key for {kid} (matched with {response_kid})")
                             break
+                    
+                    if drm_info:
+                        break
                         
             except Exception as e:
-                print(f"Failed to fetch DRM key: {e}")
-                drm_info = None
+                print(f"Failed to fetch DRM key for {kid}: {e}")
+                continue
         
-        # Fetch HLS URL in background using batchId and childId
-        hls_url = None
+        if not drm_info:
+            print("❌ No working DRM key found for any KID")
+    else:
+        print("❌ No KIDs available to try")
+        
+    # Fetch HLS URL in background using batchId and childId
+    hls_url = None
+    try:
+        # First try to get HLS URL using the external API method
+        video_details = await piewallah_api.fetch_video_url_details(batchId, childId)
+        if video_details.get("success"):
+            video_data = video_details.get("data", {})
+            external_url = video_data.get("url")
+            external_signed_url = video_data.get("signedUrl", "")
+            if external_url:
+                external_full_url = f"{external_url}{external_signed_url}"
+                hls_url = await piewallah_api.generate_hls_url(external_full_url)
+                print(f"✅ HLS URL generated via external API")
+    except Exception as e:
+        print(f"❌ External API method failed: {e}")
+        
+    # Fallback: Use existing stream_url if external API failed
+    if not hls_url:
         try:
-            # First try to get HLS URL using the external API method
-            video_details = await piewallah_api.fetch_video_url_details(batchId, childId)
-            if video_details.get("success"):
-                video_data = video_details.get("data", {})
-                external_url = video_data.get("url")
-                external_signed_url = video_data.get("signedUrl", "")
-                if external_url:
-                    external_full_url = f"{external_url}{external_signed_url}"
-                    hls_url = await piewallah_api.generate_hls_url(external_full_url)
-                    print(f"✅ HLS URL generated via external API")
+            print(f"🔄 Falling back to existing stream_url for HLS generation")
+            hls_url = await piewallah_api.generate_hls_url(full_stream_url)
+            print(f" HLS URL generated via fallback method")
         except Exception as e:
-            print(f"❌ External API method failed: {e}")
+            print(f"❌ Fallback method also failed: {e}")
+            hls_url = None
         
-        # Fallback: Use existing stream_url if external API failed
-        if not hls_url:
-            try:
-                print(f"🔄 Falling back to existing stream_url for HLS generation")
-                hls_url = await piewallah_api.generate_hls_url(full_stream_url)
-                print(f"✅ HLS URL generated via fallback method")
-            except Exception as e:
-                print(f"❌ Fallback method also failed: {e}")
-                hls_url = None
-        
-        # Construct response
-        response_data = {
-            "success": True,
-            "data": data,
-            "stream_url": full_stream_url,
-            "url_type": data.get("urlType", "penpencilvdo"),
-            "drm": drm_info,
-            "hls_url": hls_url
-        }
-        
-        return VideoResponse(**response_data)
+    # Construct response
+    response_data = {
+        "success": True,
+        "data": data,
+        "stream_url": full_stream_url,
+        "url_type": data.get("urlType", "penpencilvdo"),
+        "drm": drm_info,
+        "hls_url": hls_url
+    }
+    
+    return VideoResponse(**response_data)
 
 @app.get("/api/jwt/{token}", response_model=JWTResponse)
 async def decode_jwt_token(token: str):
