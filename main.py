@@ -917,25 +917,13 @@ async def decode_jwt_query(token: str = Query(..., description="JWT token to dec
 @app.get("/")
 async def root():
     return {
-        "message": "Piewallah Video API", 
-        "version": "2.0.0", 
-        "status": "running",
-        "description": "Complete API for video streaming, batch management, JWT decoding, and HLS streaming",
-        "powered_by": "SATYAM ROJHAX",
-        "only_used_for": "PIE WALLAH",
-        "endpoints": {
-            "video": "/api/video?batchId=&subjectId=&childId=",
-            "video_url_details": "/api/video-url-details?batchId=&childId=",
-            "video_url_details_external": "/api/video-url-details-external?parentid=&childid=",
-            "hls": "/api/hls?parentid=&childid=&authorization=",
-            "batches": "/api/batches?page=1&limit=692",
-            "all_batches": "/api/batches?page=0",
-            "batch_details": "/api/batch/{batchId}/details",
-            "jwt_decode_path": "/api/jwt/{token}",
-            "jwt_decode_query": "/api/jwt?token=",
-            "docs": "/api",
-            "health": "/health"
-        }
+        "status": False,
+        "message": "Please update your app. You are using outdated version(1).",
+        "data": [],
+        "time": 1770989585,
+        "interval": 10,
+        "limit": 0,
+        "cd_time": 17709764491497
     }
 
 @app.get("/api")
